@@ -17,8 +17,8 @@ import smtplib
 class Worker:
     def __init__(self, settings):
         self.set = __import__(settings)
-        self.path_todownload = ".\\download\\"
-        self.path_tounpack = ".\\unpack\\"
+        self.path_todownload = "./download/"
+        self.path_tounpack = "./unpack/"
         self.conn = None
         self.cursor = None
         self.arcfilelist = []
