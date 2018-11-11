@@ -77,7 +77,7 @@ class Worker:
                 path = self.path_todownload + filename
                 with open(path, "wb") as file:
                     ftp.retrbinary("RETR {}".format(filename), file.write)
-                self.emailtxt = self.emailtxt + ' Download new file "' + filename + '" - Ok!\n\r';
+                self.emailtxt = self.emailtxt + 'Download new file "' + filename + '" - Ok!\n'
                 self.arcfilelist.append(filename)
             ftp.quit()
 
@@ -96,14 +96,14 @@ class Worker:
                 print('\t' + file)
             print('\t')
             for file in self.arcfilelist:
-                self.emailtxt = self.emailtxt + 'Processing archive - ' + file + '\r\n'
+                self.emailtxt = self.emailtxt + '   Processing archive - "' + file + '"\n'
                 zf = zipfile.ZipFile(self.path_todownload + file)
                 self.importfilenamelist = zf.namelist()
                 for filename in self.importfilenamelist:
                     print("File to unpack: " + filename)
                     zf.extract(filename, self.path_tounpack)
                     print("Unpack - Ok")
-                    self.emailtxt = self.emailtxt + 'Unpack file: ' + filename + ' - Ok.\r\n'
+                    self.emailtxt = self.emailtxt + '        Unpack file: ' + filename + ' - Ok.\n'
                     self.file_import(self.path_tounpack + filename)
                 zf.close()
                 self.cursor = self.conn.cursor()
@@ -145,7 +145,7 @@ class Worker:
 
             self.conn.commit()
             self.cursor.close()
-            self.emailtxt = self.emailtxt + 'Import file : "' + filename + '" - Ok. Row added - ' + str(self.count) + '\r\n'
+            self.emailtxt = self.emailtxt + '            Import file : "' + filename + '" - Ok. Row added - ' + str(self.count) + '\n'
             print("Commit - Ok!")
             print('Import - Ok')
         except Exception as e:
@@ -163,7 +163,7 @@ class Worker:
                                 ))
             print(body)
             server = smtplib.SMTP(self.set.emailhost)
-            server.set_debuglevel(1)
+        #    server.set_debuglevel(1)
             server.starttls()
             server.login(self.set.emaillogin, self.set.emailpasswd)
             server.sendmail(self.set.emailfrom, self.set.emailto, body)
