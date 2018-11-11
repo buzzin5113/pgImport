@@ -7,17 +7,25 @@ Timofeev Alexey, buzzin@mail.ru
 
 import csv
 import sys
+import os
 from ftplib import FTP
 import psycopg2
+import zipfile
+import smtplib
 
 
 class Worker:
     def __init__(self, settings):
         self.set = __import__(settings)
-        self.set.path_todownload = ".\\download\\"
+        self.path_todownload = ".\\download\\"
+        self.path_tounpack = ".\\unpack\\"
         self.conn = None
         self.cursor = None
-        self.filelist = []
+        self.arcfilelist = []
+        self.importfilenamelist = []
+        self.importfilename = ""
+        self.emailtxt = ""
+        self.count = 0
 
     def db_connect(self):
         print('Connecting to the PostgreSQL database.')
@@ -33,14 +41,12 @@ class Worker:
 
     def check_ftpfilename(self, filename):
         try:
-            print("Check filename")
-
-            data = None;
-            arg = []
-            arg.append(filename)
+            print("Check filename: {}".format(filename))
+        #    arg = []
+        #    arg.append(filename)
 
             self.cursor = self.conn.cursor()
-            self.cursor.execute('select filename from db.system_lotus_ftp_file where filename=%s;', arg)
+            self.cursor.execute('select filename from db.system_lotus_ftp_file where filename=%s;', [filename, ])
             data = self.cursor.fetchone()
             if data:
                 print("File already is imported")
@@ -49,7 +55,6 @@ class Worker:
             return data;
         except Exception as e:
             Worker.system_exit('check_ftpfilename', e)
-
 
     def ftp_load(self):
         """
@@ -72,28 +77,99 @@ class Worker:
                 if self.check_ftpfilename(filename):
                     continue
                 print('Download file: {}'.format(filename))
-                path = self.set.path_todownload + filename
+                path = self.path_todownload + filename
                 with open(path, "wb") as file:
                     ftp.retrbinary("RETR {}".format(filename), file.write)
-                self.filelist.append(filename)
+                self.arcfilelist.append(filename)
             ftp.quit()
 
-            self.file_unpack()
+            if self.arcfilelist:
+                self.file_unpack()
+            else:
+                print("No files to import.")
 
         except Exception as e:
             Worker.system_exit('ftp_load', e)
 
     def file_unpack(self):
-        print('Listing files for unpack and import:\n')
-        for file in self.filelist:
-            print('\t' + file)
-        print('\t')
-        for file in self.filelist:
-            self.file_import(file)
+        try:
+            print('Listing files for unpack and import:\n')
+            for file in self.arcfilelist:
+                print('\t' + file)
+            print('\t')
+            for file in self.arcfilelist:
+                zf = zipfile.ZipFile(self.path_todownload + file)
+                self.importfilenamelist = zf.namelist()
+                for filename in self.importfilenamelist:
+                    print("File to unpack: " + filename)
+                    zf.extract(filename, self.path_tounpack)
+                    print("Unpack - Ok")
+                    self.file_import(self.path_tounpack + filename)
 
-    def file_import(self, filename):
-        print('Import file {}'.format(filename))
-        print('Import - Ok')
+                zf.close()
+                self.cursor = self.conn.cursor()
+                data = [file,]
+                self.cursor.execute("insert into db.system_lotus_ftp_file values (%s)", data)
+                self.conn.commit()
+                self.cursor.close()
+        except Exception as e:
+            Worker.system_exit('file_unpack', e)
+
+    def file_import(self, filepath):
+        try:
+            print('Import file {}'.format(filepath))
+            self.count = 0
+            self.cursor = self.conn.cursor()
+            with open(filepath, encoding='utf-8') as csv_file:
+                reader = csv.reader(csv_file, delimiter=';')
+                filename = os.path.basename(filepath)
+
+                next(reader, None)
+                for row in reader:
+                    for i in range(0, 61):
+                        if row[i] == 'NULL':
+                            row[i] = None
+                    row.append(filename)
+                    row.append('now()')
+                    self.cursor.execute("insert into db.lotus values ("
+                                        "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
+                                        "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
+                                        "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
+                                        "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
+                                        "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
+                                        "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
+                                        "%s,%s,%s)", row)
+                    if self.count % 100 == 0:
+                        print(str(self.count) + '\r', end='')
+                    self.count += 1
+
+            self.conn.commit()
+            self.cursor.close()
+            print("Commit - Ok!")
+            print('Import - Ok')
+        except Exception as e:
+            Worker.system_exit('file_unpack', e)
+
+    def email_send(self, text):
+        try:
+            self.text = text
+            body = "\r\n".join((
+                                "From: %s" % self.set.emailfrom,
+                                "To: %s" % self.set.emailto,
+                                "Subject: %s" % self.set.emailsubject,
+                                "",
+                                self.text
+                                ))
+            server = smtplib.SMTP(self.set.emailhost)
+        #    server.set_debuglevel(1)
+            server.starttls()
+            server.login(self.set.emaillogin, self.set.emailpasswd)
+            server.sendmail(self.set.emailfrom, self.set.emailto, body)
+            server.quit()
+        except Exception as e:
+            print("Error send email")
+            print(e)
+            sys.exit(-1)
 
     @staticmethod
     def system_exit(method, error):
@@ -109,6 +185,14 @@ class Worker:
             print('Error in module check_importfilename. Exit to system')
             print(error)
             sys.exit(3)
+        elif method == 'check':
+            print('Error in module file_unpack. Exit to system')
+            print(error)
+            sys.exit(4)
+        elif method == 'check':
+            print('Error in module file_import. Exit to system')
+            print(error)
+            sys.exit(5)
         else:
             print('Unexpected error')
             print(error)
@@ -123,6 +207,7 @@ def main():
     work.ftp_load()
     work.db_disconnect()
 
+    work.email_send("Import is Ok")
     print('Successful. Exit to system.')
     sys.exit(0)
 
