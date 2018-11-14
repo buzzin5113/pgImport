@@ -33,7 +33,7 @@ class Worker:
             self.conn = psycopg2.connect(host=self.set.dbhost, port=self.set.dbport, database=self.set.dbname,
                                          user=self.set.dbuser, password=self.set.dbpasswd)
         except Exception as e:
-            Worker.system_exit('db_connect', e)
+            Worker.system_exit(self, 'db_connect', e)
 
     def db_disconnect(self):
         print('Disconnect database.')
@@ -51,7 +51,7 @@ class Worker:
             self.cursor.close()
             return data;
         except Exception as e:
-            Worker.system_exit('check_ftpfilename', e)
+            Worker.system_exit(self, 'check_ftpfilename', e)
 
     def ftp_load(self):
         """
@@ -87,7 +87,7 @@ class Worker:
                 print("No files to import.")
 
         except Exception as e:
-            Worker.system_exit('ftp_load', e)
+            Worker.system_exit(self, 'ftp_load', e)
 
     def file_unpack(self):
         try:
@@ -112,14 +112,25 @@ class Worker:
                 self.cursor.close()
 
         except Exception as e:
-            Worker.system_exit('file_unpack', e)
+            Worker.system_exit(self, 'file_unpack', e)
 
     def file_import(self, filepath):
         try:
-            print('Import file {}'.format(filepath))
             self.count = 0
             filename = os.path.basename(filepath)
+            print('Import file {}'.format(filepath))
+            self.emailtxt += '        Import file {} \n'.format(filename)
+            tableindex = filename.replace('_', '-').split('-')
+
             self.cursor = self.conn.cursor()
+            print(tableindex)
+            if self.set.tabledict.get(tableindex[0]):
+                tablename = self.set.tabledict.get(tableindex[0])
+            else:
+                print("        Not found table in table dic.")
+                self.emailtxt += '        Not found table in table dic\n'
+                self.system_exit('unknown table')
+
             with open(filepath, encoding='utf-8') as csv_file:
                 reader = csv.reader(csv_file, delimiter=';')
 
@@ -130,14 +141,14 @@ class Worker:
                             row[i] = None
                     row.append(filename)
                     row.append('now()')
-                    self.cursor.execute("insert into db.lotus values ("
+                    self.cursor.execute("insert into {0} values ("
                                         "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
                                         "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
                                         "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
                                         "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
                                         "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
                                         "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
-                                        "%s,%s,%s)", row)
+                                        "%s,%s,%s)".format(tablename), row)
                     if self.count % 100 == 0:
                         print(str(self.count) + '\r', end='')
                     self.count += 1
@@ -149,19 +160,20 @@ class Worker:
             print("Commit - Ok!")
             print('Import - Ok')
         except Exception as e:
-            Worker.system_exit('file_unpack', e)
+            Worker.system_exit(self, 'file_import', e)
 
     def email_send(self):
+        #print(self.emailtxt)
         try:
-            body = "\r\n".join((
+            body = u"\r\n".join((
                                 "From: %s" % self.set.emailfrom,
                                 "To: %s" % self.set.emailto,
                                 "Subject: %s" % self.set.emailsubject,
                                 "",
                                 self.emailtxt,
                                 'Successful.'
-                                ))
-            print(body)
+                                )).encode('utf-8')
+            #print(body)
             server = smtplib.SMTP(self.set.emailhost)
         #    server.set_debuglevel(1)
             server.starttls()
@@ -173,31 +185,62 @@ class Worker:
             print(e)
             sys.exit(-1)
 
-    @staticmethod
-    def system_exit(method, error):
+    def system_exit(self, method, error=None):
+        self.set.emailsubject = self.set.emailsubjecterror
         if method == 'db_connect':
             print('Error connect to database. Exit to system.')
             print(error)
+            self.emailtxt += '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
+            self.emailtxt += 'Error connect to database. Exit to system.\n'
+         #   self.emailtxt += str(error) + '\n'
+            self.email_send()
             sys.exit(1)
         elif method == 'ftp_load':
             print('Error in module FTP. Exit to system')
             print(error)
+            self.emailtxt += '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
+            self.emailtxt += 'Error in module FTP. Exit to system.\n'
+        #    self.emailtxt += str(error) + '\n'
+            self.email_send()
             sys.exit(2)
-        elif method == 'check':
+        elif method == 'check_ftpfilename':
             print('Error in module check_importfilename. Exit to system')
             print(error)
+            self.emailtxt += '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
+            self.emailtxt += 'Error in module check_importfilename. Exit to system.\n'
+        #    self.emailtxt += str(error) + '\n'
+            self.email_send()
             sys.exit(3)
-        elif method == 'check':
+        elif method == 'file_unpack':
             print('Error in module file_unpack. Exit to system')
             print(error)
+            self.emailtxt += '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
+            self.emailtxt += 'Error in module file_import. Exit to system.\n'
+        #    self.emailtxt += str(error) + '\n'
+            self.email_send()
             sys.exit(4)
-        elif method == 'check':
+        elif method == 'file_import':
             print('Error in module file_import. Exit to system')
             print(error)
+            self.emailtxt += '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
+            self.emailtxt += 'Error in module file_import. Exit to system.\n'
+            self.emailtxt += str(error) + '\n'
+            self.email_send()
+            sys.exit(5)
+        elif method == 'unknown table':
+            print('Unknown table. Exit to system')
+            print(error)
+            self.emailtxt += '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
+            self.emailtxt += 'Unknown table. Exit to system.\n'
+            self.email_send()
             sys.exit(5)
         else:
             print('Unexpected error')
             print(error)
+            self.emailtxt += '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
+            self.emailtxt += 'Unexpected error.\n'
+            self.emailtxt += str(error) + '\n'
+            self.email_send()
             sys.exit(-1)
 
 
