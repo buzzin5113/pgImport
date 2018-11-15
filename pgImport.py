@@ -43,7 +43,7 @@ class Worker:
         try:
             print("Check filename: {}".format(filename))
             self.cursor = self.conn.cursor()
-            self.cursor.execute('select filename from db.system_lotus_ftp_file where filename=%s;', [filename, ])
+            self.cursor.execute('select filename from {0} where filename=%s;'.format(self.set.ftplistfilestable), [filename, ])
             data = self.cursor.fetchone()
             if data:
                 print("File already is imported")
@@ -103,6 +103,9 @@ class Worker:
             for file in self.arcfilelist:
                 print('\t' + file)
             print('\t')
+
+            self.cursor = self.conn.cursor()
+
             for file in self.arcfilelist:
                 self.emailtxt = self.emailtxt + '   Processing archive - "' + file + '"\n'
                 zf = zipfile.ZipFile(self.path_todownload + file)
@@ -114,8 +117,8 @@ class Worker:
                     self.emailtxt = self.emailtxt + '        Unpack file: ' + filename + ' - Ok.\n'
                     self.file_import(self.path_tounpack + filename)
                 zf.close()
-                self.cursor = self.conn.cursor()
-                self.cursor.execute("insert into db.system_lotus_ftp_file values (%s)", [file, ])
+
+                self.cursor.execute("insert into {0} values (%s)".format(self.set.ftplistfilestable), [file, ])
                 self.conn.commit()
                 self.cursor.close()
 
@@ -130,8 +133,6 @@ class Worker:
             self.emailtxt += '        Import file {} \n'.format(filename)
             tableindex = filename.replace('_', '-').split('-')
 
-            self.cursor = self.conn.cursor()
-            print(tableindex)
             if self.set.tabledict.get(tableindex[0]):
                 tablename = self.set.tabledict.get(tableindex[0])
             else:
@@ -162,9 +163,8 @@ class Worker:
                     self.count += 1
                 print('Total rows: ', self.count)
 
-            self.conn.commit()
-            self.cursor.close()
-            self.emailtxt = self.emailtxt + '            Import file : "' + filename + '" - Ok. Row added - ' + str(self.count) + '\n'
+            self.emailtxt = self.emailtxt + '            Import file : "' + filename + '" - Ok. Row added - ' + \
+                            str(self.count) + '\n'
             print("Commit - Ok!")
             print('Import - Ok')
         except Exception as e:
