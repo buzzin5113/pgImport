@@ -68,9 +68,17 @@ class Worker:
             ftp.getwelcome()
             ftp.pwd()
 
+            # Получаем список файлов с FTP сервера
             contents = ftp.nlst()
+            # В цикле обрабатываем все имена
             for filename in contents:
-                #Проверим что еще не скачивали этот файл
+                # Проверим маску файла на допустимые, берем начало строки до символа '-' или '_'
+                if filename.replace('_', '-').split('-')[0] not in self.set.ftpmaskfile:
+                    print('Wrong filename mask {0} - skip file'.format(filename))
+                    self.emailtxt += 'Wrong filename mask - skip file {} \n\n'.format(filename)
+                    # Если маски нет в списке, то пропускаем и начинаем цикл загрузки заново
+                    continue
+                # Проверим что еще не скачивали этот файл
                 if self.check_ftpfilename(filename):
                     continue
                 print('Download file: {}'.format(filename))
