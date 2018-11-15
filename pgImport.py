@@ -104,9 +104,8 @@ class Worker:
                 print('\t' + file)
             print('\t')
 
-            self.cursor = self.conn.cursor()
-
             for file in self.arcfilelist:
+                self.cursor = self.conn.cursor()
                 self.emailtxt = self.emailtxt + '   Processing archive - "' + file + '"\n'
                 zf = zipfile.ZipFile(self.path_todownload + file)
                 self.importfilenamelist = zf.namelist()
