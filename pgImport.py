@@ -2,6 +2,17 @@
 pgImport - импоррт данных в СУБД PostgreSQL из формата CSV.
 Включает в себя закачку данных с FTP, разархивирование, контроль скачанных и загруженных файлов
 
+Краткий алгоритм работы:
+1. Создание экземпляра класса Worker с импортом данных из файла настроек
+2. Коннект к FTP серверу и получение списка файлов(архивов) в корневой директрии
+3. Проверка на наличие новых файлов, список уже закачанных архивов берется из БД
+4. Проверка на совпадение с известной маской файла
+5. Скачивание новых файлов
+6. Распаковка кождого файла (предполагается использование архиватора ZIP)
+7. Проверка имени распакованного файла на совпадение с известной маской для определения таблицы для импорта.
+    Если маска не найдена, то пропуск файла
+8. После окончания импорта всех файлов из таблицы - обновление таблицы со списком импортированных архивов
+
 Timofeev Alexey, buzzin@mail.ru
 """
 
@@ -15,8 +26,13 @@ import smtplib
 
 
 class Worker:
+    """
+    Содержит весь функционал программы
+    """
     def __init__(self, settings):
+        # Импорт настроек из внешнего .py файла
         self.set = __import__(settings)
+        # Перечень переменных
         self.path_todownload = "./download/"
         self.path_tounpack = "./unpack/"
         self.conn = None
@@ -26,8 +42,17 @@ class Worker:
         self.importfilename = ""
         self.emailtxt = 'pgImport started.\r\n'
         self.count = 0
+        self.tablename = ''
+        self.truncate = ''
+        self.delimiter = ''
+        self.encoding = ''
+        self.sqltext = ''
 
     def db_connect(self):
+        """
+        Подключение к БД.
+        Параметры подключения устанавливаются в конструкторе класса
+        """
         print('Connecting to the PostgreSQL database.')
         try:
             self.conn = psycopg2.connect(host=self.set.dbhost, port=self.set.dbport, database=self.set.dbname,
@@ -36,20 +61,29 @@ class Worker:
             Worker.system_exit(self, 'db_connect', e)
 
     def db_disconnect(self):
+        """
+        Отключение от БД
+        """
         print('Disconnect database.')
         self.conn.close()
 
     def check_ftpfilename(self, filename):
+        """
+        Проверка на
+        :param filename: - имя архива на FTP
+        :return:
+        """
         try:
             print("Check filename: {}".format(filename))
             self.cursor = self.conn.cursor()
-            self.cursor.execute('select filename from {0} where filename=%s;'.format(self.set.ftplistfilestable), [filename, ])
+            self.cursor.execute('select filename from {0} where filename=%s;'.format(self.set.ftplistfilestable),
+                                [filename, ])
             data = self.cursor.fetchone()
             if data:
                 print("File already is imported")
             self.conn.commit()
             self.cursor.close()
-            return data;
+            return data
         except Exception as e:
             Worker.system_exit(self, 'check_ftpfilename', e)
 
@@ -89,6 +123,8 @@ class Worker:
                 self.arcfilelist.append(filename)
             ftp.quit()
 
+            # Запускаем процедуру разархивирования для каждого скачанного файла
+            # Там же происходит и импорт файлов в БД
             if self.arcfilelist:
                 self.file_unpack()
             else:
@@ -120,6 +156,9 @@ class Worker:
                 self.cursor.execute("insert into {0} values (%s)".format(self.set.ftplistfilestable), [file, ])
                 self.conn.commit()
                 self.cursor.close()
+                print("    Commit - Ok!")
+                print("    Import - Ok!")
+                self.emailtxt += '    Commit import archive "{0}" - Ok!\n'.format(file)
 
         except Exception as e:
             Worker.system_exit(self, 'file_unpack', e)
@@ -130,42 +169,73 @@ class Worker:
             filename = os.path.basename(filepath)
             print('Import file {}'.format(filepath))
             self.emailtxt += '        Import file {} \n'.format(filename)
-            tableindex = filename.replace('_', '-').split('-')
+            tableindex = filename.replace('_', '-').replace('.', '-').split('-')
 
+            # Проверка на сопоставление имени файла и имени таблицы для импорта
             if self.set.tabledict.get(tableindex[0]):
-                tablename = self.set.tabledict.get(tableindex[0])
+
+                # Загрузка настроек импорта из словаря в настройках
+                self.tablename = self.set.tabledict.get(tableindex[0]).get('tablename')
+                self.truncate = self.set.tabledict.get(tableindex[0]).get('truncate')
+                self.delimiter = self.set.tabledict.get(tableindex[0]).get('delimiter')
+                self.encoding = self.set.tabledict.get(tableindex[0]).get('encoding')
+
+                # Проверяем на необходимость очистки таблицы
+                if self.truncate:
+                    self.sqltext = 'truncate table {0};'.format(self.tablename)
+                    self.cursor.execute(self.sqltext)
+                    print('        Trancate table {} - Ok!'.format(self.tablename))
+                    self.emailtxt += '        Trancate table {} - Ok!\n'.format(self.tablename)
+
+                # Определим количество столбцов в таблице назначения
+                self.sqltext = "select count(*) from information_schema.columns " \
+                               "where table_schema = '{0}' and table_name = '{1}';".format(self.tablename.split('.')[0],
+                                                                                           self.tablename.split('.')[1])
+                self.cursor.execute(self.sqltext);
+                column_count = self.cursor.fetchone()[0]
+
+                # Формируем SQL запрос на вставку
+                s = "%s," * column_count
+                self.sqltext = "insert into {0} values (" + s
+                self.sqltext = self.sqltext[:-1]
+                self.sqltext += ");"
+                self.sqltext = self.sqltext.format(self.tablename)
+
+                # Открываем CSV файл
+                with open(filepath, encoding=self.encoding) as csv_file:
+                    reader = csv.reader(csv_file, delimiter=self.delimiter)
+
+                    # Пропускаем заголовок файла
+                    next(reader, None)
+
+                    # Обрабатываем по одной строке
+                    for row in reader:
+
+                        # Проходим все столбцы и обрабатываем NULL
+                        for i in range(0, column_count - 2):
+                            if row[i] == 'NULL' or row[i] == '':
+                                row[i] = None
+
+                        # Добавляем данные для стандартных колонок filename и date_import
+                        row.append(filename)
+                        row.append('now()')
+
+                        # Выполняем запрос на вставку
+                        self.cursor.execute(self.sqltext, row)
+
+                        if self.count % 100 == 0:
+                            print(str(self.count) + '\r', end='')
+
+                        self.count += 1
+
+                    print('Total rows: ', self.count)
+
+                self.emailtxt = self.emailtxt + '                Import file : "' + filename + \
+                                '" - Ok. Row added - ' + str(self.count) + '\n'
             else:
-                print("        Not found table in table dic.")
-                self.emailtxt += '        Not found table in table dic\n'
-                self.system_exit('unknown table')
+                print("            Not found table in table dic.")
+                self.emailtxt += '            Not found table in table dic\n'
 
-            with open(filepath, encoding='utf-8') as csv_file:
-                reader = csv.reader(csv_file, delimiter=';')
-
-                next(reader, None)
-                for row in reader:
-                    for i in range(0, 61):
-                        if row[i] == 'NULL':
-                            row[i] = None
-                    row.append(filename)
-                    row.append('now()')
-                    self.cursor.execute("insert into {0} values ("
-                                        "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
-                                        "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
-                                        "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
-                                        "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
-                                        "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
-                                        "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
-                                        "%s,%s,%s)".format(tablename), row)
-                    if self.count % 100 == 0:
-                        print(str(self.count) + '\r', end='')
-                    self.count += 1
-                print('Total rows: ', self.count)
-
-            self.emailtxt = self.emailtxt + '            Import file : "' + filename + '" - Ok. Row added - ' + \
-                            str(self.count) + '\n'
-            print("Commit - Ok!")
-            print('Import - Ok')
         except Exception as e:
             Worker.system_exit(self, 'file_import', e)
 
@@ -194,42 +264,38 @@ class Worker:
 
     def system_exit(self, method, error=None):
         self.set.emailsubject = self.set.emailsubjecterror
+        self.emailtxt += '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
         if method == 'db_connect':
             print('Error connect to database. Exit to system.')
             print(error)
-            self.emailtxt += '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
             self.emailtxt += 'Error connect to database. Exit to system.\n'
-         #   self.emailtxt += str(error) + '\n'
+            self.emailtxt += str(error) + '\n'
             self.email_send()
             sys.exit(1)
         elif method == 'ftp_load':
             print('Error in module FTP. Exit to system')
             print(error)
-            self.emailtxt += '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
             self.emailtxt += 'Error in module FTP. Exit to system.\n'
-        #    self.emailtxt += str(error) + '\n'
+            self.emailtxt += str(error) + '\n'
             self.email_send()
             sys.exit(2)
         elif method == 'check_ftpfilename':
             print('Error in module check_importfilename. Exit to system')
             print(error)
-            self.emailtxt += '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
             self.emailtxt += 'Error in module check_importfilename. Exit to system.\n'
-        #    self.emailtxt += str(error) + '\n'
+            self.emailtxt += str(error) + '\n'
             self.email_send()
             sys.exit(3)
         elif method == 'file_unpack':
             print('Error in module file_unpack. Exit to system')
             print(error)
-            self.emailtxt += '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
             self.emailtxt += 'Error in module file_import. Exit to system.\n'
-        #    self.emailtxt += str(error) + '\n'
+            self.emailtxt += str(error) + '\n'
             self.email_send()
             sys.exit(4)
         elif method == 'file_import':
             print('Error in module file_import. Exit to system')
             print(error)
-            self.emailtxt += '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
             self.emailtxt += 'Error in module file_import. Exit to system.\n'
             self.emailtxt += str(error) + '\n'
             self.email_send()
@@ -237,14 +303,12 @@ class Worker:
         elif method == 'unknown table':
             print('Unknown table. Exit to system')
             print(error)
-            self.emailtxt += '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
             self.emailtxt += 'Unknown table. Exit to system.\n'
             self.email_send()
             sys.exit(5)
         else:
             print('Unexpected error')
             print(error)
-            self.emailtxt += '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
             self.emailtxt += 'Unexpected error.\n'
             self.emailtxt += str(error) + '\n'
             self.email_send()
