@@ -223,6 +223,7 @@ class Worker:
                         # Выполняем запрос на вставку
                         self.cursor.execute(self.sqltext, row)
 
+                        # Печать счетчика вставленных строк через каждые 100 строк
                         if self.count % 100 == 0:
                             print(str(self.count) + '\r', end='')
 
