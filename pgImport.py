@@ -47,6 +47,8 @@ class Worker:
         self.delimiter = ''
         self.encoding = ''
         self.sqltext = ''
+        self.sql_before = None
+        self.sql_after = None
 
     def db_connect(self):
         """
@@ -179,6 +181,7 @@ class Worker:
                 self.truncate = self.set.tabledict.get(tableindex[0]).get('truncate')
                 self.delimiter = self.set.tabledict.get(tableindex[0]).get('delimiter')
                 self.encoding = self.set.tabledict.get(tableindex[0]).get('encoding')
+                self.sql_after = self.set.tabledict.get(tableindex[0]).get('script_after')
 
                 # Проверяем на необходимость очистки таблицы
                 if self.truncate:
@@ -233,6 +236,12 @@ class Worker:
 
                 self.emailtxt = self.emailtxt + '                Import file : "' + filename + \
                                 '" - Ok. Row added - ' + str(self.count) + '\n'
+
+                # Скрипт после окончания импорта таблицы
+                if self.sql_after:
+                    print("        Execute script after import table.")
+                    self.emailtxt += '         Execute script after import table\n'
+                    self.cursor.execute(self.sql_after);
             else:
                 print("            Not found table in table dic.")
                 self.emailtxt += '            Not found table in table dic\n'
