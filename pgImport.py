@@ -257,12 +257,11 @@ class Worker:
                                 "To: %s" % self.set.emailto,
                                 "Subject: %s" % self.set.emailsubject,
                                 "",
-                                self.emailtxt,
-                                'Successful.'
+                                self.emailtxt
                                 )).encode('utf-8')
             #print(body)
             server = smtplib.SMTP(self.set.emailhost)
-        #    server.set_debuglevel(1)
+            # server.set_debuglevel(1)
             server.starttls()
             server.login(self.set.emaillogin, self.set.emailpasswd)
             server.sendmail(self.set.emailfrom, self.set.emailto, body)
