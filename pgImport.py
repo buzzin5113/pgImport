@@ -240,8 +240,10 @@ class Worker:
                 # Скрипт после окончания импорта таблицы
                 if self.sql_after:
                     print("        Execute script after import table.")
-                    self.emailtxt += '         Execute script after import table\n'
-                    self.cursor.execute(self.sql_after);
+                    self.emailtxt += '         Execute script after import table:\n'
+                    self.emailtxt += '             {0}'.format(self.sql_after)
+                    self.emailtxt += '\n'
+                    self.cursor.execute(self.sql_after)
             else:
                 print("            Not found table in table dic.")
                 self.emailtxt += '            Not found table in table dic\n'
