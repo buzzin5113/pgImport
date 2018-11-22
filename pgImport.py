@@ -146,7 +146,7 @@ class Worker:
                 self.cursor = self.conn.cursor()
                 self.emailtxt = self.emailtxt + '   Processing archive - "' + file + '"\n'
                 zf = zipfile.ZipFile(self.path_todownload + file)
-                self.importfilenamelist = zf.namelist()
+                self.importfilenamelist = sorted(zf.namelist())
                 for filename in self.importfilenamelist:
                     print("File to unpack: " + filename)
                     zf.extract(filename, self.path_tounpack)
