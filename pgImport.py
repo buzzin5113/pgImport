@@ -136,25 +136,33 @@ class Worker:
             Worker.system_exit(self, 'ftp_load', e)
 
     def file_unpack(self):
+    """
+    Распаковка архивов имна которых в списке self.archivelist
+    """
         try:
             print('Listing files for unpack and import:\n')
             for file in self.arcfilelist:
                 print('\t' + file)
             print('\t')
 
+            # Проходим по каждому архиву
             for file in self.arcfilelist:
                 self.cursor = self.conn.cursor()
                 self.emailtxt = self.emailtxt + '   Processing archive - "' + file + '"\n'
                 zf = zipfile.ZipFile(self.path_todownload + file)
+                # Получаем список файлов в архиве и сортируем его
                 self.importfilenamelist = sorted(zf.namelist())
+                # Проходим по каждому файлу
                 for filename in self.importfilenamelist:
                     print("File to unpack: " + filename)
                     zf.extract(filename, self.path_tounpack)
                     print("Unpack - Ok")
                     self.emailtxt = self.emailtxt + '        Unpack file: ' + filename + ' - Ok.\n'
+                    # После распаковки вызываем метод импорта файла в БД
                     self.file_import(self.path_tounpack + filename)
                 zf.close()
 
+                # После импорта всех файлов, записываем имя архива в БД чтобы больше его не обрабатывать
                 self.cursor.execute("insert into {0} values (%s)".format(self.set.ftplistfilestable), [file, ])
                 self.conn.commit()
                 self.cursor.close()
@@ -171,6 +179,7 @@ class Worker:
             filename = os.path.basename(filepath)
             print('Import file {}'.format(filepath))
             self.emailtxt += '        Import file {} \n'.format(filename)
+            # Получаем имя файла до первого символа -,_,.
             tableindex = filename.replace('_', '-').replace('.', '-').split('-')
 
             # Проверка на сопоставление имени файла и имени таблицы для импорта
