@@ -136,9 +136,9 @@ class Worker:
             Worker.system_exit(self, 'ftp_load', e)
 
     def file_unpack(self):
-    """
-    Распаковка архивов имна которых в списке self.archivelist
-    """
+        """
+        Распаковка архивов имна которых в списке self.archivelist
+        """
         try:
             print('Listing files for unpack and import:\n')
             for file in self.arcfilelist:
